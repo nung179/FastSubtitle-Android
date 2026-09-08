@@ -8,6 +8,7 @@ import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.graphics.Color
 import android.graphics.PixelFormat
+import android.graphics.drawable.GradientDrawable
 import android.media.AudioAttributes
 import android.media.AudioFormat
 import android.media.AudioPlaybackCaptureConfiguration
@@ -17,9 +18,15 @@ import android.media.projection.MediaProjectionManager
 import android.os.Build
 import android.os.IBinder
 import android.view.Gravity
+import android.view.MotionEvent
 import android.view.WindowManager
 import android.widget.TextView
 import androidx.core.app.NotificationCompat
+import com.google.mlkit.common.model.DownloadConditions
+import com.google.mlkit.nl.translate.TranslateLanguage
+import com.google.mlkit.nl.translate.Translation
+import com.google.mlkit.nl.translate.Translator
+import com.google.mlkit.nl.translate.TranslatorOptions
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
@@ -28,6 +35,7 @@ import okhttp3.WebSocketListener
 import okio.ByteString
 import org.json.JSONObject
 import java.util.concurrent.TimeUnit
+import kotlin.math.abs
 
 class SubtitleService : Service() {
 
@@ -41,6 +49,15 @@ class SubtitleService : Service() {
 
         const val EXTRA_API_KEY =
             "api_key"
+
+        const val EXTRA_BAHASA_SUMBER =
+            "bahasa_sumber"
+
+        const val EXTRA_BAHASA_TUJUAN =
+            "bahasa_tujuan"
+
+        const val EXTRA_WARNA =
+            "warna"
 
         const val AKSI_BERHENTI =
             "berhenti"
@@ -75,11 +92,44 @@ class SubtitleService : Service() {
         TextView? =
         null
 
+    private var parameterOverlay:
+        WindowManager.LayoutParams? =
+        null
+
+    private var translator:
+        Translator? =
+        null
+
+    private var translatorSiap =
+        false
+
+    private var bahasaSumber =
+        "zh"
+
+    private var bahasaTujuan =
+        "id"
+
+    private var warna =
+        "kuning"
+
+    private var urutanTerjemahan =
+        0L
+
+    private var jumlahAudio =
+        0L
+
+    private var audioBersuara =
+        false
+
     private val client =
         OkHttpClient.Builder()
             .readTimeout(
                 0,
                 TimeUnit.MILLISECONDS
+            )
+            .pingInterval(
+                8,
+                TimeUnit.SECONDS
             )
             .build()
 
@@ -115,7 +165,7 @@ class SubtitleService : Service() {
                     "Fast Subtitle aktif"
                 )
                 .setContentText(
-                    "Menangkap audio internal..."
+                    "Menangkap audio internal"
                 )
                 .setSmallIcon(
                     android.R.drawable.ic_btn_speak_now
@@ -152,6 +202,27 @@ class SubtitleService : Service() {
                 )
                 .orEmpty()
 
+        bahasaSumber =
+            intent
+                ?.getStringExtra(
+                    EXTRA_BAHASA_SUMBER
+                )
+                ?: "zh"
+
+        bahasaTujuan =
+            intent
+                ?.getStringExtra(
+                    EXTRA_BAHASA_TUJUAN
+                )
+                ?: "id"
+
+        warna =
+            intent
+                ?.getStringExtra(
+                    EXTRA_WARNA
+                )
+                ?: "kuning"
+
         val resultCode =
             intent
                 ?.getIntExtra(
@@ -162,9 +233,10 @@ class SubtitleService : Service() {
 
         @Suppress("DEPRECATION")
         val resultData =
-            intent?.getParcelableExtra(
-                EXTRA_RESULT_DATA
-            ) as? Intent
+            intent
+                ?.getParcelableExtra(
+                    EXTRA_RESULT_DATA
+                ) as? Intent
 
         if (
             resultData == null ||
@@ -191,6 +263,8 @@ class SubtitleService : Service() {
 
             buatOverlay()
 
+            siapkanTranslator()
+
             bukaDeepgram(
                 apiKey
             )
@@ -200,7 +274,7 @@ class SubtitleService : Service() {
         ) {
 
             tampilkan(
-                "Gagal memulai: ${e.message}"
+                "Gagal memulai:\n${e.message}"
             )
 
             berhentiTertunda()
@@ -209,21 +283,98 @@ class SubtitleService : Service() {
         return START_NOT_STICKY
     }
 
+    private fun siapkanTranslator() {
+
+        val sumber =
+            TranslateLanguage
+                .fromLanguageTag(
+                    bahasaSumber
+                )
+
+        val tujuan =
+            TranslateLanguage
+                .fromLanguageTag(
+                    bahasaTujuan
+                )
+
+        if (
+            sumber == null ||
+            tujuan == null
+        ) {
+
+            tampilkan(
+                "Bahasa terjemahan tidak didukung."
+            )
+
+            return
+        }
+
+        val opsi =
+            TranslatorOptions.Builder()
+                .setSourceLanguage(
+                    sumber
+                )
+                .setTargetLanguage(
+                    tujuan
+                )
+                .build()
+
+        translator =
+            Translation.getClient(
+                opsi
+            )
+
+        translatorSiap =
+            false
+
+        val kondisi =
+            DownloadConditions.Builder()
+                .build()
+
+        tampilkan(
+            "Menyiapkan terjemahan..."
+        )
+
+        translator
+            ?.downloadModelIfNeeded(
+                kondisi
+            )
+            ?.addOnSuccessListener {
+
+                translatorSiap =
+                    true
+
+                tampilkan(
+                    "Siap. Putar video..."
+                )
+            }
+            ?.addOnFailureListener {
+
+                tampilkan(
+                    "Model terjemahan gagal diunduh."
+                )
+            }
+    }
+
     private fun bukaDeepgram(
         apiKey: String
     ) {
 
+        val alamat =
+            "wss://api.deepgram.com/v1/listen" +
+                "?model=nova-3" +
+                "&language=$bahasaSumber" +
+                "&interim_results=true" +
+                "&smart_format=true" +
+                "&endpointing=150" +
+                "&encoding=linear16" +
+                "&sample_rate=48000" +
+                "&channels=2"
+
         val request =
             Request.Builder()
                 .url(
-                    "wss://api.deepgram.com/v1/listen" +
-                        "?model=nova-3" +
-                        "&language=id" +
-                        "&interim_results=true" +
-                        "&smart_format=true" +
-                        "&encoding=linear16" +
-                        "&sample_rate=16000" +
-                        "&channels=1"
+                    alamat
                 )
                 .addHeader(
                     "Authorization",
@@ -277,7 +428,7 @@ class SubtitleService : Service() {
                                 hasil.isNotBlank()
                             ) {
 
-                                tampilkan(
+                                terjemahkan(
                                     hasil
                                 )
                             }
@@ -295,13 +446,64 @@ class SubtitleService : Service() {
                     ) {
 
                         tampilkan(
-                            "Koneksi gagal: ${t.message}"
+                            "Deepgram gagal:\n${t.message}"
                         )
 
                         berhentiTertunda()
                     }
                 }
             )
+    }
+
+    private fun terjemahkan(
+        teks: String
+    ) {
+
+        val mesin =
+            translator
+
+        if (
+            mesin == null ||
+            !translatorSiap
+        ) {
+
+            tampilkan(
+                teks
+            )
+
+            return
+        }
+
+        urutanTerjemahan +=
+            1
+
+        val nomor =
+            urutanTerjemahan
+
+        mesin
+            .translate(
+                teks
+            )
+            .addOnSuccessListener {
+                    hasil ->
+
+                if (
+                    nomor ==
+                    urutanTerjemahan &&
+                    hasil.isNotBlank()
+                ) {
+
+                    tampilkan(
+                        hasil
+                    )
+                }
+            }
+            .addOnFailureListener {
+
+                tampilkan(
+                    teks
+                )
+            }
     }
 
     private fun mulaiAudioInternal() {
@@ -312,7 +514,7 @@ class SubtitleService : Service() {
         ) {
 
             tampilkan(
-                "Android 10+ diperlukan."
+                "Minimal Android 10."
             )
 
             return
@@ -347,20 +549,20 @@ class SubtitleService : Service() {
                             .ENCODING_PCM_16BIT
                     )
                     .setSampleRate(
-                        16000
+                        48000
                     )
                     .setChannelMask(
                         AudioFormat
-                            .CHANNEL_IN_MONO
+                            .CHANNEL_IN_STEREO
                     )
                     .build()
 
             val ukuranMinimal =
                 AudioRecord
                     .getMinBufferSize(
-                        16000,
+                        48000,
                         AudioFormat
-                            .CHANNEL_IN_MONO,
+                            .CHANNEL_IN_STEREO,
                         AudioFormat
                             .ENCODING_PCM_16BIT
                     )
@@ -374,7 +576,7 @@ class SubtitleService : Service() {
 
                 } else {
 
-                    8192
+                    16384
                 }
 
             audioRecord =
@@ -391,11 +593,30 @@ class SubtitleService : Service() {
                     )
                     .build()
 
+            if (
+                audioRecord
+                    ?.state !=
+                AudioRecord.STATE_INITIALIZED
+            ) {
+
+                tampilkan(
+                    "Audio internal tidak dapat dibuka."
+                )
+
+                return
+            }
+
             audioRecord
                 ?.startRecording()
 
             aktif =
                 true
+
+            jumlahAudio =
+                0
+
+            audioBersuara =
+                false
 
             tampilkan(
                 "Mendengarkan audio..."
@@ -425,6 +646,14 @@ class SubtitleService : Service() {
                         jumlah > 0
                     ) {
 
+                        jumlahAudio +=
+                            jumlah
+
+                        cekAudio(
+                            buffer,
+                            jumlah
+                        )
+
                         socket
                             ?.send(
                                 ByteString.of(
@@ -438,15 +667,76 @@ class SubtitleService : Service() {
 
             }.start()
 
+            android.os.Handler(
+                mainLooper
+            ).postDelayed(
+                {
+
+                    if (
+                        aktif &&
+                        !audioBersuara
+                    ) {
+
+                        tampilkan(
+                            "Audio tidak tertangkap.\n" +
+                                "Pastikan video sedang berbunyi."
+                        )
+                    }
+
+                },
+                5000
+            )
+
         } catch (
             e: Exception
         ) {
 
             tampilkan(
-                "Audio internal gagal: ${e.message}"
+                "Audio internal gagal:\n${e.message}"
             )
 
             berhentiTertunda()
+        }
+    }
+
+    private fun cekAudio(
+        data: ByteArray,
+        jumlah: Int
+    ) {
+
+        var i =
+            0
+
+        while (
+            i + 1 <
+            jumlah
+        ) {
+
+            val sample =
+                (
+                    (data[i + 1]
+                        .toInt() shl 8) or
+                        (
+                            data[i]
+                                .toInt() and 0xFF
+                            )
+                    ).toShort()
+                    .toInt()
+
+            if (
+                abs(
+                    sample
+                ) > 200
+            ) {
+
+                audioBersuara =
+                    true
+
+                return
+            }
+
+            i +=
+                2
         }
     }
 
@@ -463,6 +753,22 @@ class SubtitleService : Service() {
                 WINDOW_SERVICE
             ) as WindowManager
 
+        val latar =
+            GradientDrawable().apply {
+
+                setColor(
+                    Color.argb(
+                        170,
+                        0,
+                        0,
+                        0
+                    )
+                )
+
+                cornerRadius =
+                    22f
+            }
+
         overlay =
             TextView(
                 this
@@ -472,40 +778,37 @@ class SubtitleService : Service() {
                     "Fast Subtitle aktif"
 
                 textSize =
-                    23f
+                    22f
 
-                // ==========================
-                // WARNA SUBTITLE
-                // ==========================
                 setTextColor(
-                    Color.YELLOW
+                    if (
+                        warna ==
+                        "putih"
+                    ) {
+                        Color.WHITE
+                    } else {
+                        Color.YELLOW
+                    }
                 )
 
-                // ==========================
-                // SHADOW HITAM
-                // ==========================
                 setShadowLayer(
-                    6f,
+                    5f,
                     2f,
                     2f,
                     Color.BLACK
                 )
 
-                // ==========================
-                // LATAR TRANSPARAN
-                // ==========================
-                setBackgroundColor(
-                    Color.TRANSPARENT
-                )
+                background =
+                    latar
 
                 gravity =
                     Gravity.CENTER
 
                 setPadding(
-                    30,
-                    16,
-                    30,
-                    16
+                    28,
+                    14,
+                    28,
+                    14
                 )
 
                 maxLines =
@@ -518,38 +821,155 @@ class SubtitleService : Service() {
                 Build.VERSION_CODES.O
             ) {
 
-                WindowManager.LayoutParams
+                WindowManager
+                    .LayoutParams
                     .TYPE_APPLICATION_OVERLAY
 
             } else {
 
                 @Suppress("DEPRECATION")
-                WindowManager.LayoutParams
+                WindowManager
+                    .LayoutParams
                     .TYPE_PHONE
             }
 
-        val parameter =
+        val preferensi =
+            getSharedPreferences(
+                "fastsubtitle_overlay",
+                MODE_PRIVATE
+            )
+
+        parameterOverlay =
             WindowManager.LayoutParams(
-                WindowManager.LayoutParams.MATCH_PARENT,
+                WindowManager.LayoutParams.WRAP_CONTENT,
                 WindowManager.LayoutParams.WRAP_CONTENT,
                 jenis,
-                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
-                    WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE,
+                WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,
                 PixelFormat.TRANSLUCENT
             ).apply {
 
                 gravity =
-                    Gravity.BOTTOM or
-                        Gravity.CENTER_HORIZONTAL
+                    Gravity.TOP or
+                        Gravity.START
+
+                x =
+                    preferensi.getInt(
+                        "x",
+                        40
+                    )
 
                 y =
-                    140
+                    preferensi.getInt(
+                        "y",
+                        1000
+                    )
             }
+
+        overlay
+            ?.setOnTouchListener(
+                object :
+                    android.view.View.OnTouchListener {
+
+                    private var awalX =
+                        0
+
+                    private var awalY =
+                        0
+
+                    private var sentuhX =
+                        0f
+
+                    private var sentuhY =
+                        0f
+
+                    override fun onTouch(
+                        view: android.view.View?,
+                        event: MotionEvent
+                    ): Boolean {
+
+                        val parameter =
+                            parameterOverlay
+                                ?: return false
+
+                        when (
+                            event.action
+                        ) {
+
+                            MotionEvent.ACTION_DOWN -> {
+
+                                awalX =
+                                    parameter.x
+
+                                awalY =
+                                    parameter.y
+
+                                sentuhX =
+                                    event.rawX
+
+                                sentuhY =
+                                    event.rawY
+
+                                return true
+                            }
+
+                            MotionEvent.ACTION_MOVE -> {
+
+                                parameter.x =
+                                    awalX +
+                                        (
+                                            event.rawX -
+                                                sentuhX
+                                            ).toInt()
+
+                                parameter.y =
+                                    awalY +
+                                        (
+                                            event.rawY -
+                                                sentuhY
+                                            ).toInt()
+
+                                try {
+
+                                    windowManager
+                                        ?.updateViewLayout(
+                                            overlay,
+                                            parameter
+                                        )
+
+                                } catch (
+                                    _: Exception
+                                ) {
+                                }
+
+                                return true
+                            }
+
+                            MotionEvent.ACTION_UP -> {
+
+                                preferensi.edit()
+                                    .putInt(
+                                        "x",
+                                        parameter.x
+                                    )
+                                    .putInt(
+                                        "y",
+                                        parameter.y
+                                    )
+                                    .apply()
+
+                                return true
+                            }
+                        }
+
+                        return false
+                    }
+                }
+            )
 
         windowManager
             ?.addView(
                 overlay,
-                parameter
+                parameterOverlay
             )
     }
 
@@ -596,7 +1016,7 @@ class SubtitleService : Service() {
             {
                 berhenti()
             },
-            2500
+            3000
         )
     }
 
@@ -646,6 +1066,19 @@ class SubtitleService : Service() {
 
         try {
 
+            translator
+                ?.close()
+
+        } catch (
+            _: Exception
+        ) {
+        }
+
+        translator =
+            null
+
+        try {
+
             mediaProjection
                 ?.stop()
 
@@ -672,6 +1105,16 @@ class SubtitleService : Service() {
             false
 
         hapusOverlay()
+
+        try {
+
+            translator
+                ?.close()
+
+        } catch (
+            _: Exception
+        ) {
+        }
 
         super.onDestroy()
     }
