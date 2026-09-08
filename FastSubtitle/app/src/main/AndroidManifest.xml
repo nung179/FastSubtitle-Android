@@ -1,12 +1,31 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!-- Izin mikrofon -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
+
+    <!-- Izin internet untuk Deepgram -->
     <uses-permission android:name="android.permission.INTERNET" />
-    <application android:theme="@style/AppTheme" android:label="Fast Subtitle" android:usesCleartextTraffic="false">
-        <activity android:name=".MainActivity" android:screenOrientation="portrait" android:exported="true">
+
+    <!-- Izin tampil mengambang di atas aplikasi lain -->
+    <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+
+    <application
+        android:theme="@style/AppTheme"
+        android:label="Fast Subtitle"
+        android:usesCleartextTraffic="false">
+
+        <activity
+            android:name=".MainActivity"
+            android:screenOrientation="portrait"
+            android:exported="true">
+
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
+
         </activity>
+
     </application>
+
 </manifest>
