@@ -1,13 +1,13 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
-    <!-- Izin mikrofon -->
-    <uses-permission android:name="android.permission.RECORD_AUDIO" />
-
-    <!-- Izin internet untuk Deepgram -->
     <uses-permission android:name="android.permission.INTERNET" />
-
-    <!-- Izin tampil mengambang di atas aplikasi lain -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
+
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
+
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <application
         android:theme="@style/AppTheme"
@@ -25,6 +25,11 @@
             </intent-filter>
 
         </activity>
+
+        <service
+            android:name=".SubtitleService"
+            android:exported="false"
+            android:foregroundServiceType="mediaProjection" />
 
     </application>
 
