@@ -474,17 +474,28 @@ class SubtitleService : Service() {
                 textSize =
                     23f
 
+                // ==========================
+                // WARNA SUBTITLE
+                // ==========================
                 setTextColor(
-                    Color.WHITE
+                    Color.YELLOW
                 )
 
+                // ==========================
+                // SHADOW HITAM
+                // ==========================
+                setShadowLayer(
+                    6f,
+                    2f,
+                    2f,
+                    Color.BLACK
+                )
+
+                // ==========================
+                // LATAR TRANSPARAN
+                // ==========================
                 setBackgroundColor(
-                    Color.argb(
-                        190,
-                        0,
-                        0,
-                        0
-                    )
+                    Color.TRANSPARENT
                 )
 
                 gravity =
